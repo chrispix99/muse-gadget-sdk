@@ -1,0 +1,5 @@
+# ESP32-C6 partition table, 4 MB flash, no OTA, no Muse
+# Name,   Type, SubType, Offset,  Size
+nvs,      data, nvs,     0x11000, 0x5000
+phy_init, data, phy,     0x16000, 0x1000
+app,      app,  factory, 0x20000, 0x1E1000

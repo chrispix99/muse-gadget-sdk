@@ -41,7 +41,7 @@
 #include "esp_lcd_panel_ops.h"
 #include "happy_anim.h"
 #include "pixel_font.h"
-#if CONFIG_HOMEHUB_LED_BACKEND_IDEASPARK_ST7789
+#if CONFIG_HOMEHUB_LED_BACKEND_IDEASPARK_ST7789 || CONFIG_HOMEHUB_LED_BACKEND_WAVESHARE_C6_ST7789
 #include "driver/spi_master.h"
 #include "esp_lcd_panel_io.h"
 #include "esp_lcd_panel_st7789.h"
@@ -141,6 +141,24 @@ static const char *TAG = "link.led";
 #define LCD_DOT_MARGIN   10
 // Draw buffers are copied into the frame buffer by the CPU.
 #define LCD_BUF_CAPS     (MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT)
+#elif CONFIG_HOMEHUB_LED_BACKEND_WAVESHARE_C6_ST7789
+// Waveshare ESP32-C6-LCD-1.47: 172x320 ST7789 panel on SPI.
+#define LCD_NAME         "Waveshare ESP32-C6 ST7789"
+#define LCD_HOST         SPI2_HOST
+#define LCD_PIN_SCLK     7
+#define LCD_PIN_MOSI     6
+#define LCD_PIN_CS       14
+#define LCD_PIN_DC       15
+#define LCD_PIN_RST      21
+#define LCD_PIN_BL       22
+#define LCD_PCLK_HZ      (40 * 1000 * 1000)
+#define LCD_H_RES        172
+#define LCD_V_RES        320
+#define LCD_X_GAP        0
+#define LCD_BAR_ROWS     10
+#define LCD_ANIM_SCALE   2
+#define LCD_DOT_MARGIN   4
+#define LCD_BUF_CAPS     MALLOC_CAP_DMA
 #endif
 
 #if CONFIG_HOMEHUB_DISPLAY
@@ -362,7 +380,7 @@ static bool s_dot_drawn = false;
 static bool s_image_mode = false;
 static const uint8_t s_dot_rows[LCD_DOT_CELLS] = {0x6, 0xf, 0xf, 0x6};
 
-#if CONFIG_HOMEHUB_LED_BACKEND_IDEASPARK_ST7789
+#if CONFIG_HOMEHUB_LED_BACKEND_IDEASPARK_ST7789 || CONFIG_HOMEHUB_LED_BACKEND_WAVESHARE_C6_ST7789
 static SemaphoreHandle_t s_draw_done = NULL;
 
 static bool lcd_draw_done(esp_lcd_panel_io_handle_t io,
@@ -575,10 +593,15 @@ static void anim_task(void *arg) {
     }
 }
 
-#if CONFIG_HOMEHUB_LED_BACKEND_IDEASPARK_ST7789
+#if CONFIG_HOMEHUB_LED_BACKEND_IDEASPARK_ST7789 || CONFIG_HOMEHUB_LED_BACKEND_WAVESHARE_C6_ST7789
 static esp_err_t lcd_panel_init(void) {
+    ESP_LOGI(TAG, "ST7789 init: creating semaphore");
     s_draw_done = xSemaphoreCreateBinary();
-    if (!s_draw_done) return ESP_ERR_NO_MEM;
+    if (!s_draw_done) {
+        ESP_LOGE(TAG, "ST7789 init: semaphore create failed");
+        return ESP_ERR_NO_MEM;
+    }
+
     spi_bus_config_t bus_cfg = {
         .sclk_io_num = LCD_PIN_SCLK,
         .mosi_io_num = LCD_PIN_MOSI,
@@ -603,15 +626,57 @@ static esp_err_t lcd_panel_init(void) {
         .bits_per_pixel = 16,
     };
     esp_lcd_panel_io_handle_t io = NULL;
+
+    ESP_LOGI(TAG, "ST7789 init: spi_bus_initialize (host=%d, sclk=%d, mosi=%d)", LCD_HOST, LCD_PIN_SCLK, LCD_PIN_MOSI);
     esp_err_t err = spi_bus_initialize(LCD_HOST, &bus_cfg, SPI_DMA_CH_AUTO);
-    if (err == ESP_OK) {
-        err = esp_lcd_new_panel_io_spi((esp_lcd_spi_bus_handle_t)LCD_HOST, &io_cfg, &io);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "ST7789 init: spi_bus_initialize failed: %s", esp_err_to_name(err));
+        return err;
     }
-    if (err == ESP_OK) err = esp_lcd_new_panel_st7789(io, &panel_cfg, &s_panel);
-    if (err == ESP_OK) err = esp_lcd_panel_reset(s_panel);
-    if (err == ESP_OK) err = esp_lcd_panel_init(s_panel);
-    if (err == ESP_OK) err = esp_lcd_panel_invert_color(s_panel, true);
-    if (err == ESP_OK) err = esp_lcd_panel_set_gap(s_panel, LCD_X_GAP, 0);
+
+    ESP_LOGI(TAG, "ST7789 init: esp_lcd_new_panel_io_spi (cs=%d, dc=%d, pclk=%d Hz)", LCD_PIN_CS, LCD_PIN_DC, LCD_PCLK_HZ);
+    err = esp_lcd_new_panel_io_spi((esp_lcd_spi_bus_handle_t)LCD_HOST, &io_cfg, &io);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "ST7789 init: esp_lcd_new_panel_io_spi failed: %s", esp_err_to_name(err));
+        return err;
+    }
+
+    ESP_LOGI(TAG, "ST7789 init: esp_lcd_new_panel_st7789 (rst=%d)", LCD_PIN_RST);
+    err = esp_lcd_new_panel_st7789(io, &panel_cfg, &s_panel);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "ST7789 init: esp_lcd_new_panel_st7789 failed: %s", esp_err_to_name(err));
+        return err;
+    }
+
+    ESP_LOGI(TAG, "ST7789 init: esp_lcd_panel_reset");
+    err = esp_lcd_panel_reset(s_panel);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "ST7789 init: esp_lcd_panel_reset failed: %s", esp_err_to_name(err));
+        return err;
+    }
+
+    ESP_LOGI(TAG, "ST7789 init: esp_lcd_panel_init");
+    err = esp_lcd_panel_init(s_panel);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "ST7789 init: esp_lcd_panel_init failed: %s", esp_err_to_name(err));
+        return err;
+    }
+
+    ESP_LOGI(TAG, "ST7789 init: esp_lcd_panel_invert_color");
+    err = esp_lcd_panel_invert_color(s_panel, true);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "ST7789 init: esp_lcd_panel_invert_color failed: %s", esp_err_to_name(err));
+        return err;
+    }
+
+    ESP_LOGI(TAG, "ST7789 init: esp_lcd_panel_set_gap (x_gap=%d)", LCD_X_GAP);
+    err = esp_lcd_panel_set_gap(s_panel, LCD_X_GAP, 0);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "ST7789 init: esp_lcd_panel_set_gap failed: %s", esp_err_to_name(err));
+        return err;
+    }
+
+    ESP_LOGI(TAG, "ST7789 init: success");
     return err;
 }
 
@@ -797,24 +862,39 @@ static esp_err_t lcd_panel_on(void) {
 #endif
 
 static bool led_hw_init(void) {
+    ESP_LOGI(TAG, "led_hw_init: starting for %s", LCD_NAME);
+
+    ESP_LOGI(TAG, "led_hw_init: allocating buffers (bar_rows=%d, anim_pixels=%d)", LCD_BAR_ROWS, LCD_ANIM_BUF_PIXELS);
     s_bar_buf = heap_caps_malloc(LCD_H_RES * LCD_BAR_ROWS * sizeof(uint16_t), LCD_BUF_CAPS);
     s_anim_buf = heap_caps_malloc(LCD_ANIM_BUF_PIXELS * sizeof(uint16_t), LCD_BUF_CAPS);
     s_lcd_lock = xSemaphoreCreateMutex();
     if (!s_bar_buf || !s_anim_buf || !s_lcd_lock) {
-        ESP_LOGE(TAG, "LCD buffer alloc failed");
+        ESP_LOGE(TAG, "LCD buffer alloc failed (bar=%p, anim=%p, lock=%p)", s_bar_buf, s_anim_buf, s_lcd_lock);
         return false;
     }
+    ESP_LOGI(TAG, "led_hw_init: buffers allocated ok");
 
+    ESP_LOGI(TAG, "led_hw_init: calling lcd_panel_init");
     esp_err_t err = lcd_panel_init();
-    // Black out everything between the bars; the animation covers only part of it.
-    if (err == ESP_OK) lcd_clear_rows(LCD_BAR_ROWS, LCD_V_RES - LCD_BAR_ROWS);
-    if (err == ESP_OK) err = lcd_panel_on();
     if (err != ESP_OK) {
-        ESP_LOGE(TAG, LCD_NAME " init failed: %s", esp_err_to_name(err));
+        ESP_LOGE(TAG, "led_hw_init: lcd_panel_init failed: %s", esp_err_to_name(err));
         s_panel = NULL;
         return false;
     }
 
+    // Black out everything between the bars; the animation covers only part of it.
+    ESP_LOGI(TAG, "led_hw_init: clearing rows %d-%d", LCD_BAR_ROWS, LCD_V_RES - LCD_BAR_ROWS);
+    lcd_clear_rows(LCD_BAR_ROWS, LCD_V_RES - LCD_BAR_ROWS);
+
+    ESP_LOGI(TAG, "led_hw_init: calling lcd_panel_on");
+    err = lcd_panel_on();
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "led_hw_init: lcd_panel_on failed: %s", esp_err_to_name(err));
+        s_panel = NULL;
+        return false;
+    }
+
+    ESP_LOGI(TAG, "led_hw_init: configuring backlight GPIO %d", LCD_PIN_BL);
     gpio_config_t bl_cfg = {
         .pin_bit_mask = 1ULL << LCD_PIN_BL,
         .mode = GPIO_MODE_OUTPUT,
@@ -823,6 +903,7 @@ static bool led_hw_init(void) {
     gpio_set_level(LCD_PIN_BL, 1);
 
     // Lower priority than the LED task so status changes are never delayed.
+    ESP_LOGI(TAG, "led_hw_init: creating anim task");
     xTaskCreate(anim_task, "lcd_anim", 2560, NULL, 1, NULL);
 
     ESP_LOGI(TAG, "LED status ready: " LCD_NAME " %dx%d display (BL=%d)",
