@@ -1254,7 +1254,7 @@ static bool lcd_draw_image_rect(int x, int y, int w, int h, const void *pixels) 
         s_image_mode = true;
         lcd_clear_rows(0, LCD_V_RES);
     }
-#if CONFIG_HOMEHUB_LED_BACKEND_IDEASPARK_ST7789
+#if CONFIG_HOMEHUB_LED_BACKEND_IDEASPARK_ST7789 || CONFIG_HOMEHUB_LED_BACKEND_WAVESHARE_C6_ST7789
     // Already in the panel's format; copied only to reach DMA memory.
     memcpy(s_anim_buf, pixels, (size_t)w * h * sizeof(uint16_t));
 #else
