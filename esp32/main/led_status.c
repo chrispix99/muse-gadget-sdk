@@ -154,7 +154,7 @@ static const char *TAG = "link.led";
 #define LCD_PCLK_HZ      (40 * 1000 * 1000)
 #define LCD_H_RES        172
 #define LCD_V_RES        320
-#define LCD_X_GAP        0
+#define LCD_X_GAP        34
 #define LCD_BAR_ROWS     10
 #define LCD_ANIM_SCALE   2
 #define LCD_DOT_MARGIN   4
