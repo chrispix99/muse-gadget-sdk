@@ -12,17 +12,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# Waveshare ESP32-C6-LCD-1.47: ST7789 LCD (172x320, SPI), RGB LED, BOOT button.
-# Status-screen board: shows state on the display with edge bars and animation.
-# 4 MB flash: one app slot, no OTA.
-CONFIG_IDF_TARGET="esp32c6"
-
-CONFIG_PARTITION_TABLE_CUSTOM=y
-CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions_waveshare_c6_lcd_147.csv"
-CONFIG_ESPTOOLPY_FLASHSIZE_4MB=y
-CONFIG_ESPTOOLPY_FLASHSIZE="4MB"
-
-CONFIG_SPIRAM=n
-CONFIG_HOMEHUB_BUTTON_GPIO=9
-CONFIG_HOMEHUB_LED_BACKEND_WAVESHARE_C6_ST7789=y
-CONFIG_HOMEHUB_TUNNEL=n
+# Name,   Type, SubType, Offset,  Size
+# Waveshare ESP32-C6-LCD-1.47: 4 MB flash, no OTA. One app slot takes the rest.
+nvs,      data, nvs,     0x11000, 0x5000
+phy_init, data, phy,     0x16000, 0x1000
+app,      app,  factory, 0x20000, 0x3E0000
