@@ -24,6 +24,8 @@
 #              Seeed SenseCAP Indicator (ESP32-S3) with a 4 inch display
 #   home-assistant-voice
 #              Home Assistant Voice PE (ESP32-S3), push-to-talk voice chat
+#   seeed-respeaker-lite
+#              reSpeaker Lite with XIAO ESP32-S3 (experimental voice profile)
 #   reterminal-e1001
 #              Seeed reTerminal E1001 (ESP32-S3) with a 7.5 inch e-paper
 #   reterminal-e1002
@@ -71,9 +73,9 @@ case "$BOARD" in
     DEFAULTS="$DEFAULTS;devices/sdkconfig.$BOARD"
     PORTS="/dev/cu.usbserial-* /dev/cu.wchusbserial* /dev/ttyUSB*"
     ;;
-  home-assistant-voice)
+  home-assistant-voice|seeed-respeaker-lite)
     TARGET=esp32s3
-    DEFAULTS="$DEFAULTS;devices/sdkconfig.home-assistant-voice"
+    DEFAULTS="$DEFAULTS;devices/sdkconfig.$BOARD"
     # The S3's own USB-Serial-JTAG, which looks like a DevKitC-1's; check
     # which board is on the port before flashing.
     PORTS="/dev/cu.usbmodem* /dev/ttyACM*"
