@@ -46,6 +46,8 @@ before adding a feature to one.
 | Board | Target | Overlay(s) after `sdkconfig.defaults` | Helper |
 |---|---|---|---|
 | ESP32-C5 DevKitC-1 (default) | `esp32c5` | none | `tools/board.sh devkit` |
+| ESP32-C6 devkit without PSRAM | `esp32c6` | `devices/sdkconfig.c6-nopsram` | `tools/board.sh c6-nopsram` |
+| Espressif ESP32-S3-DevKitC-1 v1.1 (N8R8) | `esp32s3` | `devices/sdkconfig.espressif-s3-devkitc-1` | `tools/board.sh espressif-s3-devkitc-1` |
 | ideaspark ESP32 + 1.9" ST7789 | `esp32` | `devices/sdkconfig.ideaspark` | `tools/board.sh ideaspark` |
 | Seeed SenseCAP Indicator | `esp32s3` | `devices/sdkconfig.sensecap-indicator` | `tools/board.sh sensecap-indicator` |
 | Seeed reTerminal E1001 | `esp32s3` | `devices/sdkconfig.reterminal-e1001` | `tools/board.sh reterminal-e1001` |
@@ -62,7 +64,9 @@ before adding a feature to one.
 | M5Stack StickS3 | `esp32s3` | `devices/sdkconfig.muse;devices/sdkconfig.muse-m5stack-sticks3` | manual |
 | M5Stack StopWatch | `esp32s3` | `devices/sdkconfig.muse;devices/sdkconfig.muse-m5stack-stopwatch` | manual |
 | M5Stack CoreS3 | `esp32s3` | `devices/sdkconfig.muse;devices/sdkconfig.muse-m5stack-cores3` | `tools/muse/board.sh build cores3` |
+| Freenove FNK0104B | `esp32s3` | `devices/sdkconfig.muse;devices/sdkconfig.muse-fnk0104b` | `tools/muse/board.sh build fnk0104b` |
 | M5Stack StickC Plus2 | `esp32` | `devices/sdkconfig.muse;devices/sdkconfig.muse-m5stack-stickc-plus2` | manual |
+| M5Stack Core2 (v1.0) | `esp32` | `devices/sdkconfig.muse;devices/sdkconfig.muse-m5stack-core2` | `tools/muse/board.sh build core2` |
 
 The default profile expects the C5 DevKitC-1: an addressable status LED on
 GPIO27, the BOOT button on GPIO28 (active low), 8 MB flash and quad PSRAM.
@@ -119,7 +123,7 @@ voice note that Muse answers in the app, and the dial sets the speaker volume
 
 ### Boards with the full UI, by hand
 
-`tools/muse/board.sh build|flash <s3|s3n|aipi|box3|c6|watcher|sticks3|plus2|cardputer-adv|stopwatch|cores3> [SERIAL|PORT]`
+`tools/muse/board.sh build|flash <s3|s3n|aipi|box3|c6|watcher|sticks3|plus2|cardputer-adv|stopwatch|cores3|core2> [SERIAL|PORT]`
 builds one board in `build-muse-<profile>/`, logs to
 `/tmp/muse_build_<board>.log`, and clears `managed_components/` before and
 after so it doesn't clash with other boards. When flashing, it finds the
@@ -212,7 +216,7 @@ flash size and status backend.
    ```
 
    The target narrows it a long way: `esp32c5` is the DevKitC-1, `esp32c6` the
-   Waveshare C6, `esp32` the ideaspark or the StickC Plus2.
+   Waveshare C6 or a C6 devkit, `esp32` the ideaspark or the StickC Plus2.
 
 4. **Fall back to a read-only capture.** If the board is mid-run and you can't
    write to the port, the `## Monitor` recipe below reads it without resetting,
@@ -417,6 +421,58 @@ The device still needs to be paired once for its token.
   larger Secure Boot bootloader. Check the `check_sizes` line in the build
   output: app slots are 2 MB (4 MB on Muse).
 
+## Adding a command
+
+Muse calls a gadget's commands by name: the firmware lists them in
+`link.register` and answers each `link.invoke`. A command you add lives in two
+places, which must use the same name. (`device.health` and `device.ota` are
+handled in `noise_control.cpp` itself; everything else goes through
+`on_ws_command()`.)
+
+1. **Advertise it** in `build_register_json()` in `main/noise_control.cpp`:
+   `add_command(commands, "relay.set", "<description>", required, optional)`.
+   `required` and `optional` map each parameter's name to `{type,
+   description}` (`string_param()` makes a string one). Muse reads the
+   descriptions, so say what the command does and what it returns. If it can
+   take longer than the default 30 seconds, set its `timeout_ms`, as
+   `device.discover` does.
+2. **Handle it** in `on_ws_command()` in `main/app.c`. Return
+   `{"ok": true, "payload": {...}}`, or `command_error(code, message)` for a
+   failure. Only `ok`, `payload` (or a `payload_json` string) and the
+   error's `message` reach the Muse. Always return a result: `NULL` reaches
+   the Muse as a generic "command handler did not return a result" error.
+   Validate the parameters yourself: `params` is `NULL` when the request has
+   none, and the firmware doesn't check them against the advertised
+   `required` and `optional`, so check each one's presence, type, length and
+   allowed values.
+3. **Don't block.** `on_ws_command()` runs on the Noise session's task, so
+   anything slow (the network, a slow sensor, a camera) belongs in its own
+   task. Copy `request_id`, `session_generation` and every parameter the task
+   needs, strings included, into memory the task owns (`device.discover`
+   uses `cJSON_Duplicate()`): the request is freed as soon as
+   `on_ws_command()` returns. If an allocation or the task start fails, free
+   what you allocated and return `command_error()`. Otherwise start the task
+   and return `{"_async": true}`. The task then calls
+   `noise_ctrl_send_command_result()` once, failures included, or the Muse
+   waits out the timeout. It takes ownership of the result and frees it, so
+   don't free or reuse it afterwards. `camera.capture` and `device.discover`
+   work this way. A result from an earlier session is dropped.
+4. **Gate it on a Kconfig option** in `main/Kconfig.projbuild` when it needs
+   particular hardware, and wrap both places in the same `#if`, as
+   `sensors.read` does with `CONFIG_HOMEHUB_SENSECAP_SENSORS`. Add new source
+   files to `main/CMakeLists.txt`.
+5. **Keep `link.register` small.** It's printed into at most 8 KB, and a
+   device whose registration doesn't fit never registers.
+6. **Add a host test** in `tests/`. `test_link_sensecap_sensors.py` checks
+   that `sensors.read` is advertised and dispatched under the same option, and
+   runs its parser against a harness.
+
+Muse sees the command once the board reconnects with the new firmware. Keep
+the management commands that `on_ws_command()` also handles (`device.list_vms`,
+`device.set_vm`, `device.reset_vm` and `device.unpair`) out of
+`link.register`: `tests/test_link_transport_contract.py` checks they stay
+unadvertised.
+
 ## Say Muse, never Hatch
 
 Users never see the name Hatch.
@@ -460,6 +516,16 @@ python3 -m unittest discover -s tests -p 'test_*.py'
 Run one `idf.py build` first: `test_link_discovery` compiles cJSON from
 `managed_components/`, and that directory only exists after a build. Set `CC`
 or `CXX` to change compilers.
+
+Two tests skip quietly when their inputs are missing; check the summary for
+`skipped=`:
+
+- `test_noise_core` links against the host's PSA Crypto library, found with
+  `pkg-config mbedcrypto`. Install `libmbedtls-dev` and `pkg-config` on Debian
+  or Ubuntu (as CI does), or `mbedtls` and `pkgconf` with Homebrew.
+- `test_link_pairing_handshake` builds Mbed TLS from source for its
+  real-crypto case, so it needs `IDF_PATH` (set by `export.sh`) or
+  `MBEDTLS_SOURCE_DIR`.
 
 ## Before you hand back work
 
